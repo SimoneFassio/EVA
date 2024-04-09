@@ -21,7 +21,7 @@ make test
     - [x] Frontend
     - [x] Backend
     - [ ] MQTT connection tests [Is pending cause Raspberry died]
-- [ ] Sensors [ Eventually ]
+- [ ] Sensors [ Maybe ]
     - [ ] Backend
     - [ ] Frontend
 - [ ] Migrate from HTTP request to Socket communication [ Optional ]

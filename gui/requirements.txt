@@ -1,0 +1,17 @@
+Flask
+flask_socketio
+eventlet
+gunicorn 
+vidgear
+opencv-python
+simplejpeg
+joblib
+pyzmq
+flaskwebgui
+waitress
+paho-mqtt
+PySDL2
+PyYAML
+pyyaml-include
+pyserial
+matplotlib

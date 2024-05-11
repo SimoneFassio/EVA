@@ -1,6 +1,6 @@
 # NEW EVA 2024
 <p align="center">
-<img src="docs/rov-eva.jpg" width="60%" height="60%">
+<img src="docs/eva.jpg" width="60%" height="60%">
 </p>
 
 ## Components

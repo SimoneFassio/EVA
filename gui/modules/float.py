@@ -1,48 +1,50 @@
 from app import app
-from flask import Response, render_template, jsonify, make_response
+from flask import jsonify, make_response, request
 import serial
-from utils_float.float import start_communication, drop, status
+from utils_float.float import start_communication, send, status
 
+s = serial.Serial(timeout=2)
 
+data = {'code': "FLOAT", 'status': 0, 'text': "" }
 
-s = serial.Serial()
-
-@app.route('/FLOAT/drop')
-def float_go():
+@app.route('/FLOAT/msg')
+def float_msg():
     if (not s.is_open):
-        data = {'message': 'NO', 'code': 'No'}
+        data['status'] = False
+        data['text'] = "SERIAL NOT OPENED"
         return make_response(jsonify(data), 400)
-    drop(s)
-    data = {'message': 'Done', 'code': 'SUCCESS'}
+    msg = request.args.get('msg')
+    send(s, msg=msg)
+    data['status'] = True
+    data['text'] = 'SUCCESS'
     return make_response(jsonify(data), 201)
     
 
 @app.route('/FLOAT/start')
 def float_start():
     status = start_communication(s)
-    if (not status):
-        data = {'status': status, 'code': 'NO USB'}
-        return make_response(jsonify(data), 200)
-    data = {'status': status, 'code': 'CONNECTED'}
+    data['status'] = status['status']
+    data['text'] = status['text']
     return make_response(jsonify(data), 201)
 
 
 @app.route('/FLOAT/status')
 def float_status():
     if (not s.is_open):
-        data = {'status': False, 'code': 'SERIAL NOT OPENED'}
+        data['status'] = False
+        data['text'] = 'SERIAL NOT OPENED'
         return make_response(jsonify(data), 200)
     sts = status(s)
-    if sts['text'] == "FINISHED":   
-        data = {'status': sts['status'],
-                'code': sts['text'],
-                'data': sts['data']
-                }
-        return make_response(jsonify(data), 201)
+    if sts['text'] == "FINISHED":    
+        imgdata = {
+                'code': data['code'],
+                'status': sts['status'],
+                'data': sts['data'],
+                'text': sts['text']   
+            }
+        return make_response(jsonify(imgdata), 201)
     
-    data = {'status': sts['status'], 'code': sts['text']}
+    data['status'] = sts['status']
+    data['text'] = sts['text']
     return make_response(jsonify(data), 201)
 
-@app.route('/FLOAT')
-def float():
-    return render_template("FLOAT.html")

@@ -1,20 +1,18 @@
 from serial import Serial, SerialException
 import json
-import time
+import platform
 import matplotlib.pyplot as plt
 import os
 from io import BytesIO
 import base64
 
-
 def plot_pressure_time(data):
     pressures = data['pressures']
     times = data['times']         
-    plt.plot(times, pressures, label='ciao.png')
+    plt.plot(times, pressures)
     plt.xlabel('Time')
     plt.ylabel('Pressure')
     plt.title('Pressure vs Time')
-    plt.legend()
     plt.grid()
     buffer = BytesIO()
     plt.savefig(buffer, format='png')
@@ -29,61 +27,59 @@ def start_communication(s: Serial):
     with open(os.path.dirname(os.path.abspath(__file__)) +"/config/float.json") as jmaps:
         conf = json.load(jmaps)
         s.baudrate = conf['baudrate']
+        sys = platform.system()
+        if "Windows" in sys:
+            dir = f"{conf['portW']}"
+        elif "Linux" in sys:
+            dir = f"{conf['port']}"
+        else:
+            raise AssertionError("Your OS is not supported")
         for i in range(0, 4):
-            dir = f"{conf['port']}{i}"
             try:
-                s.port = dir
+                s.port = f"{dir}{i}"
                 s.open()
-                if (status(s)['status']):
-                    return 1
+                val = status(s)
+                return val
             except SerialException:
                 continue
-        return 0
+        return {
+            'text': "NO USB",
+            'status':0
+        }
      
 
 def status(s:Serial):
-    timeout = 2 # secondi
-    time_i = time.time()
     try:
         s.write(b'STATUS\n')
-        while True:    
-            line = s.readline().strip()
-            if (line == b'CONNECTED' or line == b'IMMERSION' or line == b'CONNECTED READY'):
-                return {
-                    'text': line.strip().decode(),
-                    'status': 1
-                }
-            elif (line == b'UPLOAD_DATA'):
-                # Lettura dati
+        line = s.read_until().strip()
+        if (line == b'UPLOAD_DATA'):
+            # Lettura dati
+            s.write(b"LISTENING")
+            times = []
+            pressures = []
+            while (True):                    
+                line = s.readline().strip()
+                if (line == b'STOP_DATA'):
+                    break
+                data = json.loads(line.decode())
+                times.append(data['times'])
+                pressures.append(data['pressures'])
 
-                times = []
-                pressures = []
-                while (True):                    
-                    line = s.readline().strip()
-                    if (line == b'STOP_DATA'):
-                        break
-                    data = json.loads(line.decode())
-                    times.append(data['times'])
-                    pressures.append(data['pressures'])
-
-
-                json_complete = {
-                    "times": times,
-                    "pressures": pressures
-                }   
-                data = plot_pressure_time(json_complete)
-                return {
-                    'text': "FINISHED",
-                    'status': 1,
-                    'data': data,
-                }
-
-            if (time.time() - time_i > timeout):
-                return {
-                    'text': "DISCONNECTED",
-                    'status': 0
-                }
-
+            json_complete = {
+                "times": times,
+                "pressures": pressures
+            }   
+            s.write(b"DATA_RECEIVED")
+            data = plot_pressure_time(json_complete)
+            return {
+                'text': "FINISHED",
+                'status': 1,
+                'data': data,
+            }
+        return {
+            'text': line.strip().decode(),
+            'status': 1
+        }
     except SerialException:
         # USB staccata
         s.close()
@@ -91,8 +87,15 @@ def status(s:Serial):
             'text': "DISCONNECTED",
             'status': 0
         }
+    except TimeoutError:
+        # L'esp non risponde
+        s.close()
+        return {
+            'text': "ESP DOESN'T ANSWER",
+            'status': 0
+        }
 
 
-def drop(s: Serial):
+def send(s: Serial, msg: str):
     s.reset_output_buffer()
-    s.write(b'GO\n')
+    s.write(f'{msg}\n'.encode('utf-8'))

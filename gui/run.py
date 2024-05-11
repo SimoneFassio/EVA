@@ -1,33 +1,27 @@
 from app import app
-import os
 from flaskwebgui import FlaskUI
 import logging
 
 log = logging.getLogger('werkzeug')
 log.setLevel(logging.ERROR)
 
-def start_flask(**server_kwargs):
-    app = server_kwargs.pop("app", None)
-    server_kwargs.pop("debug", None)
-
-    try:
-        import waitress
-
-        waitress.serve(app, **server_kwargs)
-    except:
-        app.run(**server_kwargs)
-
-
 if __name__ == "__main__":
+    # NORMAL
     FlaskUI(
-        server=start_flask,
-        server_kwargs={
-            "app": app,
-            "port": 3000,
-            "threaded": True,
-        },
+        app=app,
+        server="flask",
         fullscreen= True,
+        port=5000
     ).run()
-    # app.run("0.0.0.0", port=os.getenv('PORT', 6969), debug=True)
+    
 
-
+    # DEBUG SOCKET
+    #socketio.run(app,port=5000)
+    # SOCKET (Maybe in future will be useful)    
+    # FlaskUI(
+        # app=app,
+        # socketio=socketio,
+        # server="flask_socketio",
+        # fullscreen= True,
+        # port=5000
+    # ).run()

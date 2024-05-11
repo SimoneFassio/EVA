@@ -1,14 +1,20 @@
 # GUI EVA
 Developed as a web application using Flask in Python for backend development and HTML, JS, CSS for frontend development. 
-## Installation
+## Installation (Linux)
+You must have NodeJS and Python version 3.10
 ```
-python -m venv env
-source ./env/bin/activate
-pip install -r "requirements.txt"
+python3 -m venv venv
+source ./venv/bin/activate
+pip install -r 'requirements.txt'
+cd ./static
+npm install
+cd ..
 ```
+## Installation (Windows)
+Good luck, Useless
 ## Usage
 ```
-source ./env/bin/activate
+source ./venv/bin/activate
 make test
 ```
 ## Roadmap
@@ -17,23 +23,21 @@ make test
 - [x] General Backend
 - [x] Camera
 - [x] Float
-- [ ] Controller
+- [x] Controller
     - [x] Frontend
     - [x] Backend
-    - [ ] MQTT connection tests [Is pending cause Raspberry died]
-- [ ] Sensors [ Maybe ]
-    - [ ] Backend
-    - [ ] Frontend
-- [ ] Migrate from HTTP request to Socket communication [ Optional ]
-    - [ ] Float
-    - [ ] Controller
-- [ ] Redo Prompt (ssh doesn't work properly)
-- [ ] Testing
-- [ ] Documentation
+    - [x] MQTT connection tests
+- [x] Sensors [ Eventually ]
+    - [x] Backend
+    - [x] Frontend
+- [x] Testing
+- [x] Documentation
 
 ## PROBLEMS
-* Prompt doesn't work
 * Never tested on Windows
 
+## Documentation
+The GUI is developed as a web application where data, such as HTML pages, is fetched via HTTP requests; Real-time information is obtained through WebSocket implementation. Request types are handled by the Flask framework.
+![SCHEMA](/static/IMG/SCHEMA.png)
 ## License
 No license

@@ -38,6 +38,6 @@ make test
 
 ## Documentation
 The GUI is developed as a web application where data, such as HTML pages, is fetched via HTTP requests; Real-time information is obtained through WebSocket implementation. Request types are handled by the Flask framework.
-![SCHEMA](/static/IMG/SCHEMA.png)
+![SCHEMA](./static/IMG/SCHEMA.png)
 ## License
 No license

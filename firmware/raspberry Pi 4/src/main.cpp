@@ -17,17 +17,12 @@
 
 #include "IMU/WIT61P.h"
 #include "BAR/driver_ms5837_basic.h"
-#include "interpolation.c"
 
 
 using json = nlohmann::json;
 using msg_pt = std::shared_ptr<const mqtt::message>;
 
 // Macro used to define contants used in the code
-#define NUM_SERVO 8
-#define MQTT_TIMEOUT 10             // milliseconds
-#define MQTT_CONNECT_RETRY_DELAY 15 // milliseconds
-#define ESC_DELAY 7000              // millisecons
 #define MIN_INPUT_READING -32678    // Minimum input reading value from the joystick
 #define MAX_INPUT_READING 32678     // Maximum input reading value from the joystick
 #define MAX_MAPPED_VALUE 1720       // Minium value to which the joystick reading is mapped
@@ -53,7 +48,6 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 #define MAX_SPEED 1.0
 #define dt 0.03
 
-#define map_pwm(X) X == 1500 ? 0.0 : ((X / (1900.0 + 1100.0)) * dt * MAX_SPEED * (X >= 1500 ? 1.0 : -1.0))
 #define sleepMillis(t) std::this_thread::sleep_for(std::chrono::milliseconds(t))
 
 const std::string SERVER_ADDRESS	{ "tcp://10.0.0.254:1883" };
@@ -72,6 +66,8 @@ void MQTT_connect();
 void MQTT_reconnect();
 long map_to(long x, long in_min, long in_max, long out_min, long out_max);
 float normalize(float x, float in_min, float in_max, float out_min, float out_max);
+float normalizeSqrt(long x);
+float normalizeQuadratic(long x);
 void loopMotori(msg_pt msg);
 void loopBraccio(msg_pt msg);
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl);
@@ -88,16 +84,16 @@ void loadBaseConfig();
 
 
 // motors position definition
-typedef enum {
-  FDX,
-  RSX,
-  RDX,
-  UPRSX,
-  FSX,
-  UPFDX,
-  UPFSX,
-  UPRDX
-} motors_position_mapping;
+// typedef enum {
+//   FDX,
+//   RSX,
+//   RDX,
+//   UPRSX,
+//   FSX,
+//   UPFDX,
+//   UPFSX,
+//   UPRDX
+// } motors_position_mapping;
 
 /*
 Motors:
@@ -279,12 +275,21 @@ void loopMotori(msg_pt msg) {
   YAW = ((int)commandsIn["YAW"]);
 
   // remap the recived values into a proper interval range, in order to process them
-  Z_URemap = map_to(Z_U, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
-  Z_DRemap = map_to(Z_D, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
+  //Z_URemap = map_to(Z_U, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
+  //Z_DRemap = map_to(Z_D, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
+  Z_URemap = normalizeSqrt(Z_U);
+  Z_DRemap = normalizeSqrt(Z_D);
+  if(Z_URemap==0) Z_URemap=1500;
+  if(Z_DRemap==0) Z_DRemap=1500;
 
-  XRemap = normalize(X, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
-  YRemap = normalize(Y, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
-  YAWRemap = normalize(YAW, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
+  // XRemap = normalize(X, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
+  // YRemap = normalize(Y, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
+  // YAWRemap = normalize(YAW, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
+
+  XRemap = normalizeQuadratic(X);
+  YRemap = normalizeQuadratic(Y);
+  YAWRemap = normalizeQuadratic(YAW);
+
   std::cout << "XRemap " << XRemap << std::endl;
   std::cout << "YRemap " << YRemap << std::endl;
   std::cout << "YAWRemap " << YAWRemap << std::endl;
@@ -462,6 +467,20 @@ long map_to(long x, long in_min, long in_max, long out_min, long out_max) {
 
 float normalize(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+}
+
+float normalizeQuadratic(long x) {
+  int sign=1;
+  if(x>0)
+    sign = 1;
+  else
+    sign = -1;
+  
+  return (float)(x*x)/(float)(MAX_INPUT_READING*MAX_INPUT_READING)*sign;
+}
+
+float normalizeSqrt(long x) {
+  return (((float)(sqrt(x+MAX_INPUT_READING))/(float)sqrt(MAX_INPUT_READING*2))*(MAX_Z-SERVO_OFF))+SERVO_OFF;
 }
 
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl) {

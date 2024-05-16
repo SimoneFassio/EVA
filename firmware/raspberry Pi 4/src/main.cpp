@@ -25,22 +25,11 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 // Macro used to define contants used in the code
 #define MIN_INPUT_READING -32678    // Minimum input reading value from the joystick
 #define MAX_INPUT_READING 32678     // Maximum input reading value from the joystick
-#define MAX_MAPPED_VALUE 1720       // Minium value to which the joystick reading is mapped
-#define MIN_MAPPED_VALUE 1250       // Maximum value to which the joystick reading is mapped
+#define MAX_MAPPED_VALUE 1760       // Minium value to which the joystick reading is mapped
+#define MIN_MAPPED_VALUE 1200       // Maximum value to which the joystick reading is mapped
 #define MAX_Z 1750
 #define SERVO_OFF 1500 // 1500 // Value to write in order to stop the servo
 #define DEPTH_SEND_INTERVAL 1000
-
-#define NUM_SERVO 8
-#define MQTT_TIMEOUT 10             // milliseconds
-#define MQTT_CONNECT_RETRY_DELAY 15 // milliseconds
-#define ESC_DELAY 7000              // millisecons
-#define MIN_INPUT_READING -32678    // Minimum input reading value from the joystick
-#define MAX_INPUT_READING 32678     // Maximum input reading value from the joystick
-#define MIN_MAPPED_VALUE 1760       // Minium value to which the joystick reading is mapped
-#define MAX_MAPPED_VALUE 1200       // Maximum value to which the joystick reading is mapped
-#define MAX_Z 1750
-#define SERVO_OFF 1500 // 1500 // Value to write in order to stop the servo
 
 // CONTROLLER VARIABLES
 #define minForceZ -60
@@ -56,7 +45,6 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 #define weight 171.10864
 #define buoyancy 179.5909
 
-
 #define MAX_SPEED 1.0
 #define dt 0.03
 
@@ -69,7 +57,7 @@ const std::string TOPIC_COMMANDS 	{ "commands/" };
 const std::string TOPIC_PID 	    { "pid/" };  
 const std::string TOPIC_CONFIG 	  { "config/" };  
 const std::string TOPIC_DEBUG 	  { "debug/" };  
-const std::string TOPIC_DEPTH 	  { "depth/" };  
+const std::string TOPIC_DEPTH 	  { "depth/" };
 
 const int  QOS = 0;
 
@@ -89,7 +77,6 @@ void changeControllerStatus(double depth, int Z_URemap);
 int connectSerial();
 void connectSerial1();
 void my_handler(int s);
-
 int motorSign (float v);
 
 void readConfig(msg_pt configMsg);
@@ -138,7 +125,6 @@ double referenceZ = 0;
 double referencePitch = 0;
 double referenceRoll = 0;
 double last_depth_send_millis = 0;
-
 float temperature_c;
 float pressure_mbar;
 float pressure_zero;
@@ -147,7 +133,6 @@ bool control_on = true;
 bool globalControllerStatus = false;
 
 char Debug[100];
-
 
 //IMU
 char const *dev = "/dev/i2c-1";
@@ -161,7 +146,6 @@ json pwdValues;
 json armCommands;
 json jsonConfig;
 
-
 // Serial related variables
 int fd;
 const std::string serialPrefix = "/dev/ttyACM";
@@ -172,7 +156,6 @@ std::map <std::string, int> mapper;
 
 // mqtt and communication related variables
 mqtt::async_client cli(SERVER_ADDRESS, CLIENT_ID);
-
 auto connOpts = mqtt::connect_options_builder()
 	.clean_session(true)
 	.finalize();
@@ -186,7 +169,9 @@ int main() {
   MQTT_connect();
   loadBaseConfig();
   connectSerial1();
-/*
+
+  std::cout << (double)jsonConfig["denFHeave2"]<<std::endl << (double)jsonConfig["numFHeave1"]<<std::endl <<(double)jsonConfig["numFHeave2"]<<std::endl<<(double)jsonConfig["denCHeave2"]<<std::endl<<(double)jsonConfig["denCHeave3"]<<std::endl;
+  
   // Init del controllore
   ControlSystemZ zControl = ControlSystemZ(minForceZ, maxForceZ, minErrorBar, weight, buoyancy, 
                                     jsonConfig["denFHeave2"], jsonConfig["numFHeave1"], jsonConfig["numFHeave2"], jsonConfig["denCHeave2"], jsonConfig["denCHeave3"], 
@@ -196,7 +181,7 @@ int main() {
                                     jsonConfig["denCPitch3"], jsonConfig["numCPitch2"], jsonConfig["numCPitch3"], jsonConfig["cPITCH_inf"]);
   ControlSystemROLL rollControl = ControlSystemROLL(minForcePitch, maxForcePitch, minErrorImu, weight, buoyancy, 
                                     jsonConfig["denCRoll2"], jsonConfig["denCRoll3"], jsonConfig["numCRoll2"], jsonConfig["numCRoll3"], jsonConfig["cROLL_inf"]);
-*/
+  
   res = WT61P_begin(const_cast<char*>(dev), addr);
   if (res != 0) {
     jsonConfig["globalControllerStatus"] = false; // Se fallisce init barometro disattivare controllore 
@@ -219,12 +204,9 @@ int main() {
     cli.publish(TOPIC_DEBUG, Debug);
   }
 
-
   // Settare pressione iniziale per il calcolo della profondità
   pressure_zero = setBaselinePressure();
 
-
-  //!!!! Add Wildcard for null command, using !!!
   mapper["ROTATE WRIST CCW"] = 0;
   mapper["ROTATE WRIST CW"] = 1;
   mapper["STOP WRIST"] = 2;
@@ -253,8 +235,8 @@ int main() {
     
     // Leggi dati dai sensori e se attivo calcolare i pwm del controllore
     readSensorsData();
-    //if (jsonConfig["globalControllerStatus"]) 
-    //  controlSystemCallFunction(zControl, pitchControl, rollControl);
+    if (jsonConfig["globalControllerStatus"]) 
+      controlSystemCallFunction(zControl, pitchControl, rollControl);
     
     if(millis() - last_depth_send_millis > DEPTH_SEND_INTERVAL){
       last_depth_send_millis=millis();
@@ -420,7 +402,7 @@ void loopMotori(msg_pt msg) {
     pwdValues["UPFSX"] = Z_DRemap;
   }
   
-  changeControllerStatus(depth, Z_URemap);
+  //changeControllerStatus(depth, Z_URemap);
 
   // Send via Serial JSON package
   std::string pwdString = pwdValues.dump();
@@ -485,7 +467,6 @@ long map_to(long x, long in_min, long in_max, long out_min, long out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
 
-
 float normalize(float x, float in_min, float in_max, float out_min, float out_max) {
   return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 }
@@ -505,7 +486,6 @@ float normalizeSqrt(long x) {
 }
 
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl) {
-
   char DebugControllerInfo[200];
   
   if (control_on == true) {
@@ -520,12 +500,12 @@ void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitch
     pwdValues["UPFSX"] = (int) pwm.T6;
     
     sprintf(DebugControllerInfo,
-            "{\"refZ\":%f, \"Force(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"Z_Uremap\":%d,\"Z_DRemap\":%d}",
+            "{\"refZ\":%f, \"ForcePitch(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"Z_Uremap\":%d,\"Z_DRemap\":%d}",
             referenceZ,
-            forceZ,
+            forcePitch,
             depth,
-            referenceRoll,
-            referencePitch,
+            roll,
+            pitch,
             Z_URemap,
             Z_DRemap);
     cli.publish(TOPIC_PID, DebugControllerInfo);
@@ -557,7 +537,6 @@ void readSensorsData(){
 
   //if no connection read are zeros, so exclude them and keep the previous
   if (referenceRoll_new != 0)
-
     roll = referenceRoll_new;
   if (referencePitch_new != 0)
     pitch = referencePitch_new * -1;
@@ -571,7 +550,7 @@ void readSensorsData(){
     }
     else
       depth = (pressure_mbar-pressure_zero)*100/(9.80665*997.0f);  //997=density fresh water
-
+    
 }
 
 int setBaselinePressure() {
@@ -615,17 +594,14 @@ void connectSerial1() {
   fd = serialOpen("/dev/ttyACM0", 115200);
   if(fd>=0){
     std::cout << "serial /dev/ttyACM0 open fd: " << fd <<  std::endl;
-
     sprintf(Debug,"serial /dev/ttyACM0 open");
     cli.publish(TOPIC_DEBUG, Debug);
-
   }
   else{
     sleepMillis(20);
     fd = serialOpen("/dev/ttyACM1", 115200);
     if(fd>=0){
       std::cout << "serial /dev/ttyACM1 open" << std::endl;
-
       sprintf(Debug,"serial /dev/ttyACM1 open");
       cli.publish(TOPIC_DEBUG, Debug);
     }

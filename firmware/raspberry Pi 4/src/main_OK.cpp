@@ -28,20 +28,16 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 #define MAX_MAPPED_VALUE 1730       // Minium value to which the joystick reading is mapped
 #define MIN_MAPPED_VALUE 1240       // Maximum value to which the joystick reading is mapped
 #define MAX_Z 1750
-#define MIN_Z 1250
 #define SERVO_OFF 1500 // 1500 // Value to write in order to stop the servo
 #define DEPTH_SEND_INTERVAL 1000
-#define INTERVAL_CONTROLLORE 10 //ms
 
 // CONTROLLER VARIABLES
 #define minForceZ -10
 #define maxForceZ 10
 #define minForceRoll -2
 #define maxForceRoll 2
-#define minForcePitch -5
-#define maxForcePitch 5
-
-#define DEGtoRAD 0.01745329f
+#define minForcePitch -2
+#define maxForcePitch 2
 
 // da regolare in base alla risposta dei sensori:
 #define minErrorImu 0
@@ -52,13 +48,14 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 #define MAX_SPEED 1.0
 #define dt 0.03
 
+#define DEGtoRAD 0.01745329f
+
 #define sleepMillis(t) std::this_thread::sleep_for(std::chrono::milliseconds(t))
 
 const std::string SERVER_ADDRESS	{ "tcp://10.0.0.254:1883" };
 const std::string CLIENT_ID		    { "raspberry" };
 const std::string TOPIC_AXES 			{ "axes/" };  
 const std::string TOPIC_COMMANDS 	{ "commands/" };  
-const std::string TOPIC_STATE_COMMANDS 	{ "state_commands/" };  
 const std::string TOPIC_PID 	    { "pid/" };  
 const std::string TOPIC_CONFIG 	  { "config/" };  
 const std::string TOPIC_DEBUG 	  { "debug/" };  
@@ -74,7 +71,6 @@ float normalize(float x, float in_min, float in_max, float out_min, float out_ma
 float normalizeSqrt(long x);
 float normalizeQuadratic(long x);
 void loopMotori(msg_pt msg);
-void state_commands(msg_pt msg);
 void loopBraccio(msg_pt msg);
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl);
 void readSensorsData();
@@ -116,41 +112,28 @@ Motors:
 See the ROV picture for a proper understanding of the motors mapping
 */
 
-  typedef enum {
-  CHANGE_CONTROLLER_STATUS,
-  ARM,
-  DISARM,
-  TRIM_PITCH_FORWARD,
-  TRIM_PITCH_BACKWARD,
-  TRIM_ROLL_LEFT,
-  TRIM_ROLL_RIGHT
-} state_commands_map;
-
-int arm=0;  //if =1 rov attivo
-int previousArm=0;
-int trimPitch=0;
-int trimRoll=0;
-
 // Axes realated variable
-int X, Y, Z, ROLL, PITCH, YAW, WRIST;
-int ZRemap;
+int X, Y, Z_U, Z_D, ROLL, PITCH, YAW, WRIST;
+int Z_URemap;
+int Z_DRemap;
 
 float XRemap, YRemap, YAWRemap;
 float RDX_x, RDX_y, FDX_x, FDX_y, FSX_x, FSX_y, RSX_x, RSX_y, RDX, RSX, FDX, FSX;
 int RDXsign, RSXsign, FDXsign, FSXsign;
 float motor_power;
-double last_controller_time=0;
 
 double depth, roll, pitch;
 double referenceZ = 0;
 double referencePitch = 0;
 double referenceRoll = 0;
 double last_depth_send_millis = 0;
+double lastControl = 0;
 float temperature_c;
 float pressure_mbar;
 float pressure_zero;
 int res;
-bool control_on = true;
+bool control_on = false;
+bool globalControllerStatus = false;
 
 char Debug[100];
 
@@ -173,7 +156,6 @@ int serialConnected = 0;
 
 // Map string command to integer
 std::map <std::string, int> mapper;
-std::map <std::string, state_commands_map> state_mapper;
 
 // mqtt and communication related variables
 mqtt::async_client cli(SERVER_ADDRESS, CLIENT_ID);
@@ -184,15 +166,12 @@ auto connOpts = mqtt::connect_options_builder()
 
 int main() {
   bool out;
-  double milliss;
   msg_pt msg;
  
   signal(SIGINT, my_handler);
   MQTT_connect();
   loadBaseConfig();
   connectSerial1();
-
-  jsonConfig["globalControllerStatus"];
 
   std::cout << (double)jsonConfig["denFHeave2"]<<std::endl << (double)jsonConfig["numFHeave1"]<<std::endl <<(double)jsonConfig["numFHeave2"]<<std::endl<<(double)jsonConfig["denCHeave2"]<<std::endl<<(double)jsonConfig["denCHeave3"]<<std::endl;
   
@@ -228,6 +207,8 @@ int main() {
     cli.publish(TOPIC_DEBUG, Debug);
   }
 
+  // Settare pressione iniziale per il calcolo della profondità
+  pressure_zero = setBaselinePressure();
 
   mapper["ROTATE WRIST CCW"] = 0;
   mapper["ROTATE WRIST CW"] = 1;
@@ -235,70 +216,45 @@ int main() {
   mapper["OPEN NIPPER"] = 3;
   mapper["CLOSE NIPPER"] = 4;
   mapper["STOP NIPPER"] = 5;
-  mapper["TORQUE_WRIST_ON"] = 9;
-  mapper["TORQUE_WRIST_OFF"] = 7;
-  mapper["TORQUE_CLAW_ON"] = 9;  //to be changed
-  mapper["TORQUE_CLAW_OFF"] = 7; //to be changed
+  mapper["TORQUE_ON"] = 9;
+  mapper["TORQUE_OFF"] = 7;
   mapper["None"] = 6;
 
-
-  state_mapper["CHANGE_CONTROLLER_STATUS"] = CHANGE_CONTROLLER_STATUS;
-  state_mapper["ARM"] = ARM;
-  state_mapper["DISARM"] = DISARM;
-  state_mapper["TRIM_PITCH_FORWARD"] = TRIM_PITCH_FORWARD;
-  state_mapper["TRIM_PITCH_BACKWARD"] =TRIM_PITCH_BACKWARD;
-  state_mapper["TRIM_ROLL_LEFT"] = TRIM_ROLL_LEFT;
-  state_mapper["TRIM_ROLL_RIGHT"] = TRIM_ROLL_RIGHT;
-
-  
-
   while (true) {
-    
-    milliss = millis();
     MQTT_connect();
 
     if (cli.try_consume_message(&msg)) { 
       std::cout << msg->get_topic() << ": " << msg->to_string() << std::endl;
       
-      if (!msg) continue;   
-
-      if (msg->get_topic() == TOPIC_STATE_COMMANDS) 
-          state_commands(msg); 
+      if (!msg) continue;    
+      
+      if (msg->get_topic() == TOPIC_COMMANDS)
+        loopBraccio(msg);
+      else if (msg->get_topic() == TOPIC_AXES) 
+        loopMotori(msg);
       else if (msg->get_topic() == TOPIC_CONFIG)
-          readConfig(msg);
-
-      if(arm){
-        if (msg->get_topic() == TOPIC_COMMANDS)
-          loopBraccio(msg);
-        else if (msg->get_topic() == TOPIC_AXES) 
-          loopMotori(msg);
-
-        if(previousArm==0 && arm==1) // Settare pressione iniziale per il calcolo della profondità
-          pressure_zero = setBaselinePressure();
-      }
+        readConfig(msg);
     }
-
-    
     
     // Leggi dati dai sensori e se attivo calcolare i pwm del controllore
-    if(milliss-last_controller_time > INTERVAL_CONTROLLORE){
-        last_controller_time = milliss;
-        readSensorsData();
-        if (arm) {
-          if (jsonConfig["globalControllerStatus"]) 
-            controlSystemCallFunction(zControl, pitchControl, rollControl);
-            std::string pwdString = pwdValues.dump();
-            serialPuts(fd, pwdString.c_str());
-        
-          if(milliss - last_depth_send_millis > DEPTH_SEND_INTERVAL){
-              last_depth_send_millis=milliss;
-              sprintf(Debug,"%.2f", depth);
-              cli.publish(TOPIC_DEPTH, Debug);
-              sprintf(Debug, "IMU roll: %.3f  pitch %.3f", roll/DEGtoRAD, pitch/DEGtoRAD);
-              cli.publish(TOPIC_DEBUG, Debug);
-          } 
-      }
+    if(millis() - lastControl > 0.01){
+      lastControl = millis();
+      readSensorsData();
+
+      if (jsonConfig["globalControllerStatus"]) 
+        controlSystemCallFunction(zControl, pitchControl, rollControl);
+      std::string pwdString = pwdValues.dump();
+      serialPuts(fd, pwdString.c_str());
     }
+    if(millis() - last_depth_send_millis > DEPTH_SEND_INTERVAL){
+      last_depth_send_millis=millis();
+      sprintf(Debug,"%.2f", depth);
+      cli.publish(TOPIC_DEPTH, Debug);
+      sprintf(Debug, "IMU roll: %.3f  pitch %.3f", roll/DEGtoRAD, pitch/DEGtoRAD);
+      cli.publish(TOPIC_DEBUG, Debug);
+    }
+
+    //sleepMillis(10);
   }
   return 0;
 }
@@ -322,12 +278,19 @@ void loopMotori(msg_pt msg) {
     return;
   }
   // parse the values recived into the allocated variable
-  Z = ((int)commandsIn["Z"]);
+  Z_U = ((int)commandsIn["Z_UP"]);
+  Z_D = ((int)commandsIn["Z_DOWN"]);
   Y = ((int)commandsIn["Y"]);
   X = ((int)commandsIn["X"]);
   YAW = ((int)commandsIn["YAW"]);
 
   // remap the recived values into a proper interval range, in order to process them
+  //Z_URemap = map_to(Z_U, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
+  //Z_DRemap = map_to(Z_D, MIN_INPUT_READING, MAX_INPUT_READING, SERVO_OFF, MAX_Z);
+  Z_URemap = normalizeSqrt(Z_U);
+  Z_DRemap = normalizeSqrt(Z_D);
+  if(Z_URemap==0) Z_URemap=1500;
+  if(Z_DRemap==0) Z_DRemap=1500;
 
   // XRemap = normalize(X, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
   // YRemap = normalize(Y, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1);
@@ -336,13 +299,10 @@ void loopMotori(msg_pt msg) {
   XRemap = normalizeQuadratic(X);
   YRemap = normalizeQuadratic(Y);
   YAWRemap = normalizeQuadratic(YAW);
-  ZRemap = normalize(Z, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1); //1 e -1 invertiti perche joystick invertito
-  ZRemap=0;
 
-  // std::cout << "XRemap " << XRemap << std::endl;
-  // std::cout << "YRemap " << YRemap << std::endl;
-  // std::cout << "YAWRemap " << YAWRemap << std::endl;
-  // std::cout << "ZRemap " << YAWRemap << std::endl;
+  std::cout << "XRemap " << XRemap << std::endl;
+  std::cout << "YRemap " << YRemap << std::endl;
+  std::cout << "YAWRemap " << YAWRemap << std::endl;
   
   //calcolo componenti
   RDX_x = XRemap;
@@ -359,49 +319,42 @@ void loopMotori(msg_pt msg) {
   FDXsign = motorSign(FDX_x + FDX_y);
   FSXsign = motorSign(FSX_x + FSX_y);
 
-  // Somma in quadratura
+  //somma in quadratura
   motor_power = sqrt(((XRemap*XRemap) + (YRemap*YRemap)));
   if (motor_power >1)   motor_power=1;   //ogni tanto la gui manda valori maggiori
-
   RDX = RSX = FDX = FSX = motor_power;
 
-  if (YAWRemap > 0) {
-    if(RDXsign >= 0)
-      RDX += YAWRemap;
-    else
-      RDX -= YAWRemap;
-
-    if(FSXsign >= 0)
-      FSX += YAWRemap;
-    else
-      FSX -= YAWRemap;
-
-    if(FDXsign >= 0)
-      FDX += YAWRemap;
-    else
-      FDX -= YAWRemap;
-
-    if(RSXsign >= 0)
-      RSX += YAWRemap;
-    else
-      RSX -= YAWRemap;
-  }
-  else {
+  if(YAWRemap>0){
     if(RDXsign>=0)
       RDX += YAWRemap;
     else
       RDX -= YAWRemap;
-
     if(FSXsign>=0)
       FSX += YAWRemap;
     else
       FSX -= YAWRemap;
-
     if(FDXsign>=0)
       FDX += YAWRemap;
     else
       FDX -= YAWRemap;
-
+    if(RSXsign>=0)
+      RSX += YAWRemap;
+    else
+      RSX -= YAWRemap;
+  }
+  else{
+    if(RDXsign>=0)
+      RDX += YAWRemap;
+    else
+      RDX -= YAWRemap;
+    if(FSXsign>=0)
+      FSX += YAWRemap;
+    else
+      FSX -= YAWRemap;
+    if(FDXsign>=0)
+      FDX += YAWRemap;
+    else
+      FDX -= YAWRemap;
     if(RSXsign>=0)
       RSX += YAWRemap;
     else
@@ -412,6 +365,11 @@ void loopMotori(msg_pt msg) {
   RSX=RSX/(1+abs(YAWRemap));
   FDX=FDX/(1+abs(YAWRemap));
   FSX=FSX/(1+abs(YAWRemap));
+
+  std::cout << "RDX " << RDX << std::endl;
+  std::cout << "RSX " << RSX << std::endl;
+  std::cout << "FDX " << FDX << std::endl;
+  std::cout << "FSX " << FSX << std::endl;
 
   if(RDXsign>=0)
     RDX = SERVO_OFF + RDX * (float)(MAX_MAPPED_VALUE-SERVO_OFF);
@@ -438,20 +396,24 @@ void loopMotori(msg_pt msg) {
   pwdValues["RSX"] = (int)RSX;
 
   // Z-Axis control
-  if(ZRemap>0)
-    ZRemap = SERVO_OFF + ZRemap * (float)(MAX_Z-SERVO_OFF);
-  else
-    ZRemap = SERVO_OFF + ZRemap * (float)(SERVO_OFF-MIN_Z);
-  
-  changeControllerStatus(depth, ZRemap);
-
+  if (Z_URemap >= Z_DRemap) {
     pwdValues["TYPE"] = 'A';
-    pwdValues["UPFDX"] = ZRemap;
-    pwdValues["UPRSX"] = ZRemap;
-    pwdValues["UPRDX"] = ZRemap;
-    pwdValues["UPFSX"] = 3000 - ZRemap;
+    pwdValues["UPFDX"] = Z_URemap;
+    pwdValues["UPRSX"] = Z_URemap;
+    pwdValues["UPRDX"] = Z_URemap;
+    pwdValues["UPFSX"] = 3000 - Z_URemap;
+  }
+  else {
+    pwdValues["TYPE"] = 'A';
+    pwdValues["UPFDX"] = 3000 - Z_DRemap;
+    pwdValues["UPRSX"] = 3000 - Z_DRemap;
+    pwdValues["UPRDX"] = 3000 - Z_DRemap;
+    pwdValues["UPFSX"] = Z_DRemap;
+  }
   
+  changeControllerStatus(depth, Z_URemap);
 
+  // Send via Serial JSON package
   std::string pwdString = pwdValues.dump();
   std::cout << "[MOTORS] " << pwdString.c_str() << std::endl;
 }
@@ -480,7 +442,6 @@ void MQTT_connect()
       if (!rsp.is_session_present())
         cli.subscribe(TOPIC_AXES, QOS)->wait();
         cli.subscribe(TOPIC_COMMANDS, QOS)->wait();
-        cli.subscribe(TOPIC_STATE_COMMANDS, QOS)->wait();
 
       std::cout << "[MQTT] " << "Connection established" << std::endl;
 
@@ -534,11 +495,12 @@ float normalizeSqrt(long x) {
 
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl) {
   char DebugControllerInfo[200];
-  
+  referenceZ = referenceZ;
+  referencePitch = 0 * DEGtoRAD;
   if (control_on == true) {
-    double forceZ = zControl.calculateZ(referenceZ, depth);
-    double forcePitch = pitchControl.calculatePitch(referencePitch, pitch);
-    double forceRoll = rollControl.calculateRoll(referenceRoll, roll);
+    double forceZ = zControl.calculateZ(referenceZ*10, depth);
+    double forcePitch = 0;//pitchControl.calculatePitch(referencePitch, pitch);
+    double forceRoll = 0; //rollControl.calculateRoll(referenceRoll, roll);
     OutputValues pwm = compute_PWM(forceZ, forceRoll, forcePitch);
     printf("[PWM PID] UPFDX: %d | UPRSX: %.2f | UPRDX: %.2f | UPFSX: %.2f\n", (int) pwm.T5, pwm.T6, pwm.T7, pwm.T8);
 
@@ -548,21 +510,24 @@ void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitch
     pwdValues["UPFSX"] = (int) pwm.T6;
     
     sprintf(DebugControllerInfo,
-            "{\"refZ\":%f, \"ForcePitch(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"ZRemap\":%d}",
+            "{\"refZ\":%f, \"ForceZ(N)\":%f, \"ForceRoll(N)\":%f, \"ForcePitch(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"Z_Uremap\":%d,\"Z_DRemap\":%d}",
             referenceZ,
+            forceZ,
+            forceRoll,
             forcePitch,
             depth,
             roll/DEGtoRAD,
             pitch/DEGtoRAD,
-            ZRemap);
+            Z_URemap,
+            Z_DRemap);
     cli.publish(TOPIC_PID, DebugControllerInfo);
-    
+
     std::string contrString = pwdValues.dump();
     std::cout << "[CONTROLLER] " << contrString.c_str() << std::endl;
   }
 }
 
-void changeControllerStatus(double depth, int ZRemap) {
+void changeControllerStatus(double depth, int Z_URemap) {
   // Threshold for activating pid at certain depth
   if (depth < 0.1)
     control_on = false;
@@ -570,10 +535,11 @@ void changeControllerStatus(double depth, int ZRemap) {
     control_on = true;
 
   // Se il rov deve salire o scendere disattivare il controllore
-  if (abs(ZRemap)>0.1) {
+  if (Z_URemap >= 1550 || Z_DRemap  >= 1550) {
     referenceZ = depth;
     control_on = false; 
   }
+  //control_on = true;
 }
 
 void readSensorsData(){
@@ -617,11 +583,6 @@ int connectSerial() {
   int maxTries = 4;
 
   std::cout << "[SERIAL] Trying connecting to serial..." << std::endl; 
-  //serialInteface = serialPrefix + std::to_string(0);
-  //std::cout << "[SERIAL] " << serialInteface.c_str() << std::endl;
-  //fd = serialOpen(serialInteface.c_str(), 115200);
-  //fd = serialOpen("/dev/ttyACM0", 115200);
-  
   // Try to connect to differet serial interfaces
   for (int i = 0; i < maxTries && !serialConnected; i++) {
     serialInteface = serialPrefix + std::to_string(i);
@@ -685,49 +646,4 @@ int motorSign (float v){
   if (v > 0)
     return 1;
   return -1;
-}
-
-void state_commands(msg_pt msg){
-  state_commands_map cmd = state_mapper[msg->to_string()];
-  switch(cmd){
-    case ARM:
-      previousArm = arm;
-      arm = 1;
-      sprintf(Debug,"ROV_ARMED");
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case DISARM:
-      previousArm = arm;
-      arm = 0;
-      sprintf(Debug,"ROV_DISARMED");
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case CHANGE_CONTROLLER_STATUS:
-      jsonConfig["globalControllerStatus"] = !jsonConfig["globalControllerStatus"];
-      sprintf(Debug,"controller status: %d", jsonConfig["globalControllerStatus"]);
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case TRIM_PITCH_FORWARD:
-      trimPitch+=5;
-      sprintf(Debug,"trimPitch: %d", trimPitch);
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case TRIM_PITCH_BACKWARD:
-      trimPitch-=5;
-      sprintf(Debug,"trimPitch: %d", trimPitch);
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case TRIM_ROLL_LEFT:
-      trimRoll+=5;
-      sprintf(Debug,"trimRoll: %d", trimRoll);
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    case TRIM_ROLL_RIGHT:
-      trimRoll-=5;
-      sprintf(Debug,"trimRoll: %d", trimRoll);
-      cli.publish(TOPIC_DEBUG, Debug);
-      break;
-    default:
-      break;
-  }
 }

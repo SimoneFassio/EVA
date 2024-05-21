@@ -3,28 +3,100 @@
 
 
 // Constructor
-ControlSystem::ControlSystem(double minForce, double maxForce, double minError, double weight, double buoyancy):
+
+
+ControlSystemZ::ControlSystemZ(double minForce, double maxForce, double minError, double weight, double buoyancy, double denFHeave2, double numFHeave1, double numFHeave2, double denCHeave2, double denCHeave3, double numCHeave2, double numCHeave3, double cZ_inf):
     
     minForce(minForce),
     maxForce(maxForce),  
     minError(minError),
     weight(weight),
-    buoyancy(buoyancy)  
-   
+    buoyancy(buoyancy),  
+    denFHeave2(denFHeave2),
+    numFHeave1(numFHeave1),
+    numFHeave2(numFHeave2),
+    denCHeave2(denCHeave2),
+    denCHeave3(denCHeave3),
+    numCHeave2(numCHeave2),
+    numCHeave3(numCHeave3),
+    cZ_inf(cZ_inf)
+
 {
 
-    this->old2DOFReference= 0.0;
+    this->oldDOF2Reference= 0.0;
+    this->old2DOF2Reference= 0.0;
     this->oldReference= 0.0;
+    this->old2Reference= 0.0;
     this->oldAntiWindUpSignal= 0.0;
     this->old2AntiWindUpSignal= 0.0;
     this->oldForce= 0.0;
     this->old2Force= 0.0;       
+    
+}
+
+ControlSystemPITCH::ControlSystemPITCH(double minForce, double maxForce, double minError, double weight, double buoyancy, double denFPitch2, double denFPitch3, double numFPitch2, double numFPitch3, double denCPitch2, double denCPitch3, double numCPitch2, double numCPitch3, double cPITCH_inf):
+    
+    minForce(minForce),
+    maxForce(maxForce),  
+    minError(minError),
+    weight(weight),
+    buoyancy(buoyancy),  
+    denFPitch2(denFPitch2),
+    denFPitch3(denFPitch3),
+    numFPitch2(numFPitch2),
+    numFPitch3(numFPitch3),
+    denCPitch2(denCPitch2),
+    denCPitch3(denCPitch3),
+    numCPitch2(numCPitch2),
+    numCPitch3(numCPitch3),
+    cPITCH_inf(cPITCH_inf)
+
+   
+{
+
+    this->oldDOF2Reference= 0.0;
+    this->old2DOF2Reference= 0.0;
+    this->oldReference= 0.0;
+    this->old2Reference= 0.0;
+    this->oldAntiWindUpSignal= 0.0;
+    this->old2AntiWindUpSignal= 0.0;
+    this->oldForce= 0.0;
+    this->old2Force= 0.0;  
 
 }
+
+ControlSystemROLL::ControlSystemROLL(double minForce, double maxForce, double minError, double weight, double buoyancy, double denCRoll2, double denCRoll3, double numCRoll2, double numCRoll3, double cROLL_inf):
+    
+    minForce(minForce),
+    maxForce(maxForce),  
+    minError(minError),
+    weight(weight),
+    buoyancy(buoyancy),  
+    denCRoll2(denCRoll2),
+    denCRoll3(denCRoll3),
+    numCRoll2(numCRoll2),
+    numCRoll3(numCRoll3),
+    cROLL_inf(cROLL_inf)
+   
+{
+
+    this->oldDOF2Reference= 0.0;
+    this->old2DOF2Reference= 0.0;
+    this->oldReference= 0.0;
+    this->old2Reference= 0.0;
+    this->oldAntiWindUpSignal= 0.0;
+    this->old2AntiWindUpSignal= 0.0;
+    this->oldForce= 0.0;
+    this->old2Force= 0.0;       
+    
+}
+
+
+
 
 
 // Computes the output of the Z controller
-double ControlSystem::calculateZ(double reference, double measurement)
+double ControlSystemZ::calculateZ(double reference, double measurement)
 {
     double error = reference - measurement;
     //Check whether the error is too small
@@ -36,15 +108,16 @@ double ControlSystem::calculateZ(double reference, double measurement)
     // From now on all the coefficients come from the antiZ-transform of controller transfer functions
     
     //2DOF control
-    double DOF2Reference = 0.970734016537625 * old2DOFReference + 0.103591752972112*reference - 0.074325769509759*oldReference;
+    double DOF2Reference = denFHeave2 * oldDOF2Reference + numFHeave1 *reference + numFHeave2 *oldReference;
 
     //Error signal
     double DOF2error = DOF2Reference - measurement;
     
     //1DOF controller with anti wind-up scheme
-    double antiWindUpSignal = 1.948785785245086*oldAntiWindUpSignal - 0.949428121819122*old2AntiWindUpSignal + 0.271858391165384e-4*oldForce - 0.272372308555764e-4*old2Force;
+    double antiWindUpSignal = denCHeave2 *oldAntiWindUpSignal + denCHeave3*old2AntiWindUpSignal + numCHeave2 *oldForce + numCHeave3 *old2Force;
     double infSignal = DOF2error - antiWindUpSignal;
-    double unSatForce = infSignal * 1.249882930717357e4; // 1.249882930717357e4 = cz_inf
+    double unSatForce = infSignal * cZ_inf; 
+    
 
     if(unSatForce > maxForce)
     {
@@ -58,7 +131,9 @@ double ControlSystem::calculateZ(double reference, double measurement)
     double Force = unSatForce - weight + buoyancy; 
     
     // Controller memory
-    old2DOFReference = DOF2Reference;
+    old2DOF2Reference = oldDOF2Reference;
+    oldDOF2Reference = DOF2Reference;
+    old2Reference = oldReference;
     oldReference =  reference;
     old2AntiWindUpSignal =  oldAntiWindUpSignal;
     oldAntiWindUpSignal = antiWindUpSignal;
@@ -68,9 +143,13 @@ double ControlSystem::calculateZ(double reference, double measurement)
 
     return Force;
 }
+
+
+
+
 
 // Computes the output of the PITCH controller
-double ControlSystem::calculatePitch(double reference, double measurement)
+double ControlSystemPITCH::calculatePitch(double reference, double measurement)
 {
     double error = reference - measurement;
     //Check whether the error is too small
@@ -82,15 +161,14 @@ double ControlSystem::calculatePitch(double reference, double measurement)
     // From now on all the coefficients come from the antiZ-transform of controller transfer functions
     
     //2DOF control
-    double DOF2Reference = 0.970734016537625 * old2DOFReference + 0.103591752972112*reference - 0.074325769509759*oldReference;
-
+    double DOF2Reference = denFPitch2 * oldDOF2Reference + denFPitch3 * old2DOF2Reference + numFPitch2 *oldReference + numFPitch3 *old2Reference;
     //Error signal
     double DOF2error = DOF2Reference - measurement;
-    
+
     //1DOF controller with anti wind-up scheme
-    double antiWindUpSignal = 1.948785785245086*oldAntiWindUpSignal - 0.949428121819122*old2AntiWindUpSignal + 0.271858391165384e-4*oldForce - 0.272372308555764e-4*old2Force;
+    double antiWindUpSignal = denCPitch2 *oldAntiWindUpSignal + denCPitch3 *old2AntiWindUpSignal + numCPitch2 *oldForce + numCPitch3 *old2Force;
     double infSignal = DOF2error - antiWindUpSignal;
-    double unSatForce = infSignal * 1.249882930717357e4; // 1.249882930717357e4 = cz_inf
+    double unSatForce = infSignal * cPITCH_inf;
 
     if(unSatForce > maxForce)
     {
@@ -104,7 +182,9 @@ double ControlSystem::calculatePitch(double reference, double measurement)
     double Force = unSatForce - weight + buoyancy; 
     
     // Controller memory
-    old2DOFReference = DOF2Reference;
+    old2DOF2Reference = oldDOF2Reference;
+    oldDOF2Reference = DOF2Reference;
+    old2Reference = oldReference;
     oldReference =  reference;
     old2AntiWindUpSignal =  oldAntiWindUpSignal;
     oldAntiWindUpSignal = antiWindUpSignal;
@@ -115,15 +195,25 @@ double ControlSystem::calculatePitch(double reference, double measurement)
     return Force;
 }
 
+
+
+
+
 // Computes the output of the ROLL controller
-double ControlSystem::calculateRoll(double reference, double measurement)
+double ControlSystemROLL::calculateRoll(double reference, double measurement)
 {
     double error = reference - measurement;
     
+    //Check whether the error is too small
+    if(error<(this->minError) && error> -(this->minError))
+    {
+        return 0.0;
+    }
+
     //1DOF controller with anti wind-up scheme
-    double antiWindUpSignal = 1.948785785245086*oldAntiWindUpSignal - 0.949428121819122*old2AntiWindUpSignal + 0.271858391165384e-4*oldForce - 0.272372308555764e-4*old2Force;
+    double antiWindUpSignal = denCRoll2 *oldAntiWindUpSignal + denCRoll3 *old2AntiWindUpSignal + numCRoll2 *oldForce + numCRoll3 *old2Force;
     double infSignal = error - antiWindUpSignal;
-    double unSatForce = infSignal * 1.249882930717357e4; // 1.249882930717357e4 = cz_inf
+    double unSatForce = infSignal * cROLL_inf;
 
     if(unSatForce > maxForce)
     {
@@ -145,3 +235,6 @@ double ControlSystem::calculateRoll(double reference, double measurement)
 
     return Force;
 }
+
+
+

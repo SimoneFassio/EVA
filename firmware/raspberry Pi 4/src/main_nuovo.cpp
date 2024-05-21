@@ -25,10 +25,10 @@ using msg_pt = std::shared_ptr<const mqtt::message>;
 // Macro used to define contants used in the code
 #define MIN_INPUT_READING -32678    // Minimum input reading value from the joystick
 #define MAX_INPUT_READING 32678     // Maximum input reading value from the joystick
-#define MAX_MAPPED_VALUE 1730       // Minium value to which the joystick reading is mapped
-#define MIN_MAPPED_VALUE 1240       // Maximum value to which the joystick reading is mapped
-#define MAX_Z 1750
-#define MIN_Z 1250
+#define MAX_PWM 1730
+#define MIN_PWM 1240
+#define MAX_PWM_Z 1750
+#define MIN_PWM_Z 1250
 #define SERVO_OFF 1500 // 1500 // Value to write in order to stop the servo
 #define DEPTH_SEND_INTERVAL 1000
 #define INTERVAL_CONTROLLORE 10 //ms
@@ -123,7 +123,11 @@ See the ROV picture for a proper understanding of the motors mapping
   TRIM_PITCH_FORWARD,
   TRIM_PITCH_BACKWARD,
   TRIM_ROLL_LEFT,
-  TRIM_ROLL_RIGHT
+  TRIM_ROLL_RIGHT,
+  PWM_UP,
+  PWM_DOWN,
+  PWM_LEFT,
+  PWM_RIGHT
 } state_commands_map;
 
 int arm=0;  //if =1 rov attivo
@@ -151,6 +155,9 @@ float pressure_mbar;
 float pressure_zero;
 int res;
 bool control_on = true;
+
+int max_pwm = MAX_PWM;
+int min_pwm = MIN_PWM;
 
 char Debug[100];
 
@@ -249,6 +256,10 @@ int main() {
   state_mapper["TRIM_PITCH_BACKWARD"] =TRIM_PITCH_BACKWARD;
   state_mapper["TRIM_ROLL_LEFT"] = TRIM_ROLL_LEFT;
   state_mapper["TRIM_ROLL_RIGHT"] = TRIM_ROLL_RIGHT;
+  state_mapper["PWM_UP"] = PWM_UP;
+  state_mapper["PWM_DOWN"] = PWM_DOWN;
+  state_mapper["PWM_RIGHT"] = PWM_RIGHT;
+  state_mapper["PWM_LEFT"] = PWM_LEFT;
 
   
 
@@ -337,7 +348,7 @@ void loopMotori(msg_pt msg) {
   YRemap = normalizeQuadratic(Y);
   YAWRemap = normalizeQuadratic(YAW);
   ZRemap = normalize(Z, MIN_INPUT_READING, MAX_INPUT_READING, -1, 1); //1 e -1 invertiti perche joystick invertito
-  ZRemap=0;
+  //ZRemap=0;
 
   // std::cout << "XRemap " << XRemap << std::endl;
   // std::cout << "YRemap " << YRemap << std::endl;
@@ -414,21 +425,21 @@ void loopMotori(msg_pt msg) {
   FSX=FSX/(1+abs(YAWRemap));
 
   if(RDXsign>=0)
-    RDX = SERVO_OFF + RDX * (float)(MAX_MAPPED_VALUE-SERVO_OFF);
+    RDX = SERVO_OFF + RDX * (float)(max_pwm-SERVO_OFF);
   else
-    RDX = SERVO_OFF - RDX  * (float)(SERVO_OFF-MIN_MAPPED_VALUE);
+    RDX = SERVO_OFF - RDX  * (float)(SERVO_OFF-min_pwm);
   if(RSXsign>=0)
-    RSX = SERVO_OFF + RSX * (float)(MAX_MAPPED_VALUE-SERVO_OFF);
+    RSX = SERVO_OFF + RSX * (float)(max_pwm-SERVO_OFF);
   else
-    RSX = SERVO_OFF - RSX * (float)(SERVO_OFF-MIN_MAPPED_VALUE);
+    RSX = SERVO_OFF - RSX * (float)(SERVO_OFF-min_pwm);
   if(FDXsign>=0)
-    FDX = SERVO_OFF + FDX * (float)(MAX_MAPPED_VALUE-SERVO_OFF);
+    FDX = SERVO_OFF + FDX * (float)(max_pwm-SERVO_OFF);
   else
-    FDX = SERVO_OFF - FDX * (float)(SERVO_OFF-MIN_MAPPED_VALUE);
+    FDX = SERVO_OFF - FDX * (float)(SERVO_OFF-min_pwm);
   if(FSXsign>=0)
-    FSX = SERVO_OFF + FSX * (float)(MAX_MAPPED_VALUE-SERVO_OFF);
+    FSX = SERVO_OFF + FSX * (float)(max_pwm-SERVO_OFF);
   else
-    FSX = SERVO_OFF - FSX * (float)(SERVO_OFF-MIN_MAPPED_VALUE);
+    FSX = SERVO_OFF - FSX * (float)(SERVO_OFF-min_pwm);
 
 
   pwdValues["TYPE"] = 'A';
@@ -439,9 +450,9 @@ void loopMotori(msg_pt msg) {
 
   // Z-Axis control
   if(ZRemap>0)
-    ZRemap = SERVO_OFF + ZRemap * (float)(MAX_Z-SERVO_OFF);
+    ZRemap = SERVO_OFF + ZRemap * (float)(MAX_PWM_Z-SERVO_OFF);
   else
-    ZRemap = SERVO_OFF + ZRemap * (float)(SERVO_OFF-MIN_Z);
+    ZRemap = SERVO_OFF + ZRemap * (float)(SERVO_OFF-MIN_PWM_Z);
   
   changeControllerStatus(depth, ZRemap);
 
@@ -529,14 +540,14 @@ float normalizeQuadratic(long x) {
 }
 
 float normalizeSqrt(long x) {
-  return (((float)(sqrt(x+MAX_INPUT_READING))/(float)sqrt(MAX_INPUT_READING*2))*(MAX_Z-SERVO_OFF))+SERVO_OFF;
+  return (((float)(sqrt(x+MAX_INPUT_READING))/(float)sqrt(MAX_INPUT_READING*2))*(MAX_PWM_Z-SERVO_OFF))+SERVO_OFF;
 }
 
 void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitchControl, ControlSystemROLL rollControl) {
   char DebugControllerInfo[200];
   
   if (control_on == true) {
-    double forceZ = zControl.calculateZ(referenceZ, depth);
+    double forceZ = zControl.calculateZ(referenceZ*10, depth);
     double forcePitch = pitchControl.calculatePitch(referencePitch, pitch);
     double forceRoll = rollControl.calculateRoll(referenceRoll, roll);
     OutputValues pwm = compute_PWM(forceZ, forceRoll, forcePitch);
@@ -548,8 +559,10 @@ void controlSystemCallFunction(ControlSystemZ zControl, ControlSystemPITCH pitch
     pwdValues["UPFSX"] = (int) pwm.T6;
     
     sprintf(DebugControllerInfo,
-            "{\"refZ\":%f, \"ForcePitch(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"ZRemap\":%d}",
+            "{\"refZ\":%f, \"ForceZ(N)\":%f, \"ForceRoll(N)\":%f, \"ForcePitch(N)\":%f,\"depth\":%f,\"roll\":%f,\"pitch\":%f,\"ZRemap\":%d}",
             referenceZ,
+            forceZ,
+            forceRoll,
             forcePitch,
             depth,
             roll/DEGtoRAD,
@@ -726,6 +739,32 @@ void state_commands(msg_pt msg){
       trimRoll-=5;
       sprintf(Debug,"trimRoll: %d", trimRoll);
       cli.publish(TOPIC_DEBUG, Debug);
+      break;
+    case PWM_UP:
+      max_pwm+=50;
+      min_pwm-=50;
+
+      if(max_pwm>MAX_PWM)
+        max_pwm=MAX_PWM;
+      if(min_pwm<MIN_PWM)
+        min_pwm=MIN_PWM;
+      break;
+    case PWM_DOWN:
+      max_pwm-=50;
+      min_pwm+=50;
+
+      if(max_pwm<SERVO_OFF+50)
+        max_pwm=SERVO_OFF+50;
+      if(min_pwm>SERVO_OFF-50)
+        min_pwm=SERVO_OFF-50;
+      break;
+    case PWM_LEFT:
+      max_pwm=MAX_PWM;
+      min_pwm=MIN_PWM;
+      break;
+    case PWM_RIGHT:
+      max_pwm=MAX_PWM-120;
+      min_pwm=MIN_PWM+120;
       break;
     default:
       break;

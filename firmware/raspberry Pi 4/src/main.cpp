@@ -62,7 +62,7 @@ const std::string TOPIC_STATE_COMMANDS 	{ "state_commands/" };
 const std::string TOPIC_PID 	    { "pid/" };
 const std::string TOPIC_CONFIG 	  { "config/" };
 const std::string TOPIC_DEBUG 	  { "debug/" };
-const std::string TOPIC_DEPTH 	  { "depth/" };
+const std::string TOPIC_GUI 	    { "gui/" };
 
 const int  QOS = 0;
 
@@ -314,7 +314,7 @@ int main() {
           pitch/DEGtoRAD,
           temperature_IMU,
           temperature_c);
-        cli.publish(TOPIC_DEBUG, Debug);
+        cli.publish(TOPIC_GUI, Debug);
       }
     }
   }
